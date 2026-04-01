@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.IO.Ports;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
@@ -12,6 +13,7 @@ namespace GbaUploadGUI
         private byte[] _selectedRom;
         private string _selectedRomPath;
         private bool _isUploading;
+        private CancellationTokenSource _uploadCancellationSource;
 
         public GbaUploadGuiForm()
         {
@@ -62,7 +64,10 @@ namespace GbaUploadGUI
 
             serialPortSelection.Enabled = !_isUploading;
             BrowseROMFileButton.Enabled = !_isUploading && hasSelectedPort;
-            UploadButton.Enabled = !_isUploading && hasSelectedPort && hasValidRom;
+            UploadButton.Enabled = _isUploading || (hasSelectedPort && hasValidRom);
+            UploadButton.Text = _isUploading
+                ? (_uploadCancellationSource != null && _uploadCancellationSource.IsCancellationRequested ? "Cancelling..." : "Cancel")
+                : "Upload!";
         }
 
         private void ResetLoadedRom()
@@ -114,6 +119,7 @@ namespace GbaUploadGUI
         private void ResetProgressBar()
         {
             progressBar1.Style = ProgressBarStyle.Blocks;
+            progressBar1.MarqueeAnimationSpeed = 0;
             progressBar1.Minimum = 0;
             progressBar1.Maximum = 100;
             progressBar1.Value = 0;
@@ -184,6 +190,18 @@ namespace GbaUploadGUI
 
         private async void UploadButton_Click(object sender, EventArgs e)
         {
+            if (_isUploading)
+            {
+                if (_uploadCancellationSource != null && !_uploadCancellationSource.IsCancellationRequested)
+                {
+                    _uploadCancellationSource.Cancel();
+                    groupBox3.Text = "Cancelling upload...";
+                    UpdateControlState();
+                }
+
+                return;
+            }
+
             string selectedPort = serialPortSelection.SelectedItem as string;
 
             if (string.IsNullOrWhiteSpace(selectedPort))
@@ -221,27 +239,40 @@ namespace GbaUploadGUI
                 return;
             }
 
+            bool wasCancelled = false;
+            bool uploadCompleted = false;
+
             _isUploading = true;
+            _uploadCancellationSource = new CancellationTokenSource();
             ResetProgressBar();
             groupBox3.Text = "Uploading...";
-            UploadButton.Text = "Uploading...";
             UpdateControlState();
 
             Progress<MultibootUploadProgress> progress = new Progress<MultibootUploadProgress>(ApplyUploadProgress);
+            MultibootOptions options = new MultibootOptions
+            {
+                BaudRate = MultibootComms.DefaultBaudRate,
+                ClientConnectTimeoutMs = 30000
+            };
 
             try
             {
-                using (MultibootComms uploader = new MultibootComms(
-                    selectedPort,
-                    new MultibootOptions
-                    {
-                        BaudRate = MultibootComms.DefaultBaudRate
-                    }))
+                using (MultibootComms uploader = new MultibootComms(selectedPort, options))
                 {
-                    await uploader.UploadRomAsync(_selectedRom, progress);
+                    await uploader.UploadRomAsync(_selectedRom, progress, _uploadCancellationSource.Token);
                 }
 
+                if (_uploadCancellationSource != null && _uploadCancellationSource.IsCancellationRequested)
+                {
+                    wasCancelled = true;
+                    ResetProgressBar();
+                    groupBox3.Text = "Upload cancelled";
+                    return;
+                }
+
+                uploadCompleted = true;
                 progressBar1.Style = ProgressBarStyle.Blocks;
+                progressBar1.MarqueeAnimationSpeed = 0;
                 progressBar1.Value = progressBar1.Maximum;
                 groupBox3.Text = "Upload complete";
 
@@ -251,6 +282,12 @@ namespace GbaUploadGUI
                     "Upload complete",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Information);
+            }
+            catch (OperationCanceledException)
+            {
+                wasCancelled = true;
+                ResetProgressBar();
+                groupBox3.Text = "Upload cancelled";
             }
             catch (UnauthorizedAccessException)
             {
@@ -301,17 +338,17 @@ namespace GbaUploadGUI
             }
             finally
             {
-                _isUploading = false;
-                UploadButton.Text = "Upload!";
-
-                if (groupBox3.Text != "Upload complete")
+                if (_uploadCancellationSource != null)
                 {
-                    groupBox3.Text = "Upload";
+                    _uploadCancellationSource.Dispose();
+                    _uploadCancellationSource = null;
                 }
 
-                if (progressBar1.Style == ProgressBarStyle.Marquee)
+                _isUploading = false;
+
+                if (!uploadCompleted && !wasCancelled && groupBox3.Text != "Upload failed")
                 {
-                    ResetProgressBar();
+                    groupBox3.Text = "Upload";
                 }
 
                 PopulateSerialPorts();

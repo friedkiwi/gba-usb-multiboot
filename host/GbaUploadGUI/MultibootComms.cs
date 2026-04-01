@@ -82,7 +82,7 @@ namespace GbaUploadGUI
         public MultibootOptions()
         {
             BaudRate = MultibootComms.DefaultBaudRate;
-            ReadTimeoutMs = 5000;
+            ReadTimeoutMs = 500;
             WriteTimeoutMs = 5000;
             StartupDrainMs = 2000;
             ClientConnectTimeoutMs = 30000;
@@ -136,6 +136,7 @@ namespace GbaUploadGUI
         private readonly SerialPort _port;
         private readonly MultibootOptions _options;
         private readonly bool _ownsPort;
+        private CancellationToken _activeCancellationToken;
         private bool _disposed;
 
         public MultibootComms(string portName)
@@ -239,10 +240,13 @@ namespace GbaUploadGUI
 
             try
             {
+                _activeCancellationToken = cancellationToken;
                 ExecuteUpload(preparedRom, progress, cancellationToken);
             }
             finally
             {
+                _activeCancellationToken = CancellationToken.None;
+
                 if (closeWhenDone)
                 {
                     Close();
@@ -333,7 +337,7 @@ namespace GbaUploadGUI
             return preparedRom;
         }
 
-        private void ExecuteUpload(byte[] rom, IProgress<MultibootUploadProgress> progress, CancellationToken cancellationToken)
+        private bool ExecuteUpload(byte[] rom, IProgress<MultibootUploadProgress> progress, CancellationToken cancellationToken)
         {
             int headerWordCount = HeaderLengthBytes / 2;
             int payloadWordCount = (rom.Length - HeaderLengthBytes) / 4;
@@ -351,10 +355,23 @@ namespace GbaUploadGUI
                 "Preparing transfer.",
                 progress);
 
-            cancellationToken.ThrowIfCancellationRequested();
-            WaitForClient(cancellationToken, progress, totalUnits, totalBytes, completedUnits);
+            if (cancellationToken.IsCancellationRequested)
+            {
+                return false;
+            }
 
-            ExpectEqual(Xfer16(0x6102), 0x7202, "master/slave info exchange");
+            if (!WaitForClient(cancellationToken, progress, totalUnits, totalBytes, completedUnits))
+            {
+                return false;
+            }
+
+            ushort? masterInfoReply = Xfer16(0x6102);
+            if (!masterInfoReply.HasValue)
+            {
+                return false;
+            }
+
+            ExpectEqual(masterInfoReply.Value, 0x7202, "master/slave info exchange");
 
             ReportProgress(
                 MultibootTransferStage.SendingHeader,
@@ -368,10 +385,19 @@ namespace GbaUploadGUI
 
             for (int offset = 0; offset < HeaderLengthBytes; offset += 2)
             {
-                cancellationToken.ThrowIfCancellationRequested();
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    return false;
+                }
 
                 ushort headerWord = (ushort)(rom[offset] | (rom[offset + 1] << 8));
-                ushort reply = Xfer16(headerWord);
+                ushort? replyValue = Xfer16(headerWord);
+                if (!replyValue.HasValue)
+                {
+                    return false;
+                }
+
+                ushort reply = replyValue.Value;
                 int expectedIndex = (HeaderLengthBytes - offset) / 2;
 
                 if (((reply >> 8) & 0xFF) != expectedIndex)
@@ -398,8 +424,21 @@ namespace GbaUploadGUI
                     progress);
             }
 
-            ExpectEqual(Xfer16(0x6200), ExpectedClientId, "header completion");
-            ExpectEqual(Xfer16(0x6202), 0x7202, "post-header info exchange");
+            ushort? headerCompleteReply = Xfer16(0x6200);
+            if (!headerCompleteReply.HasValue)
+            {
+                return false;
+            }
+
+            ExpectEqual(headerCompleteReply.Value, ExpectedClientId, "header completion");
+
+            ushort? postHeaderReply = Xfer16(0x6202);
+            if (!postHeaderReply.HasValue)
+            {
+                return false;
+            }
+
+            ExpectEqual(postHeaderReply.Value, 0x7202, "post-header info exchange");
 
             ReportProgress(
                 MultibootTransferStage.Negotiating,
@@ -411,11 +450,23 @@ namespace GbaUploadGUI
                 "Negotiating encrypted payload transfer.",
                 progress);
 
-            ushort readyReply = WaitForReadyState(cancellationToken);
+            ushort? readyReplyValue = WaitForReadyState(cancellationToken);
+            if (!readyReplyValue.HasValue)
+            {
+                return false;
+            }
+
+            ushort readyReply = readyReplyValue.Value;
             byte clientData = (byte)(readyReply & 0xFF);
             byte handshake = (byte)((0x11 + clientData + 0xFF + 0xFF) & 0xFF);
 
-            ushort handshakeReply = Xfer16((ushort)(0x6400 | handshake));
+            ushort? handshakeReplyValue = Xfer16((ushort)(0x6400 | handshake));
+            if (!handshakeReplyValue.HasValue)
+            {
+                return false;
+            }
+
+            ushort handshakeReply = handshakeReplyValue.Value;
             ExpectHighByte(handshakeReply, 0x73, "handshake");
 
             if (_options.PostHandshakeDelayMs > 0)
@@ -424,7 +475,13 @@ namespace GbaUploadGUI
             }
 
             ushort lengthInfo = unchecked((ushort)(((rom.Length - HeaderLengthBytes) / 4) - 0x34));
-            ushort lengthReply = Xfer16(lengthInfo);
+            ushort? lengthReplyValue = Xfer16(lengthInfo);
+            if (!lengthReplyValue.HasValue)
+            {
+                return false;
+            }
+
+            ushort lengthReply = lengthReplyValue.Value;
             ExpectHighByte(lengthReply, 0x73, "length exchange");
             byte lengthToken = (byte)(lengthReply & 0xFF);
 
@@ -449,7 +506,10 @@ namespace GbaUploadGUI
 
             for (int offset = HeaderLengthBytes; offset < rom.Length; offset += 4)
             {
-                cancellationToken.ThrowIfCancellationRequested();
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    return false;
+                }
 
                 uint data =
                     (uint)rom[offset] |
@@ -462,7 +522,13 @@ namespace GbaUploadGUI
 
                 uint complement = unchecked((uint)(-0x02000000 - offset));
                 uint encrypted = data ^ complement ^ seed ^ key;
-                uint reply = Xfer32(encrypted);
+                uint? replyValue = Xfer32(encrypted);
+                if (!replyValue.HasValue)
+                {
+                    return false;
+                }
+
+                uint reply = replyValue.Value;
 
                 if ((reply >> 16) != (uint)(offset & 0xFFFF))
                 {
@@ -499,17 +565,39 @@ namespace GbaUploadGUI
                 "Finalizing transfer.",
                 progress);
 
-            ExpectEqual(Xfer16(0x0065), rom.Length & 0xFFFF, "payload completion acknowledgement");
+            ushort? payloadCompleteReply = Xfer16(0x0065);
+            if (!payloadCompleteReply.HasValue)
+            {
+                return false;
+            }
+
+            ExpectEqual(payloadCompleteReply.Value, rom.Length & 0xFFFF, "payload completion acknowledgement");
             completedUnits++;
 
-            WaitForCrcWindow(cancellationToken);
+            if (!WaitForCrcWindow(cancellationToken))
+            {
+                return false;
+            }
+
             completedUnits++;
 
-            ExpectEqual(Xfer16(0x0066), 0x0075, "CRC ready signal");
+            ushort? crcReadyReply = Xfer16(0x0066);
+            if (!crcReadyReply.HasValue)
+            {
+                return false;
+            }
+
+            ExpectEqual(crcReadyReply.Value, 0x0075, "CRC ready signal");
             completedUnits++;
 
             ushort crc = unchecked((ushort)checksum);
-            ExpectEqual(Xfer16(crc), crc, "CRC exchange");
+            ushort? crcReply = Xfer16(crc);
+            if (!crcReply.HasValue)
+            {
+                return false;
+            }
+
+            ExpectEqual(crcReply.Value, crc, "CRC exchange");
             completedUnits++;
 
             ReportProgress(
@@ -521,28 +609,35 @@ namespace GbaUploadGUI
                 false,
                 "Upload complete.",
                 progress);
+
+            return true;
         }
 
-        private void WaitForClient(CancellationToken cancellationToken, IProgress<MultibootUploadProgress> progress, int totalUnits, int totalBytes, int completedUnits)
+        private bool WaitForClient(CancellationToken cancellationToken, IProgress<MultibootUploadProgress> progress, int totalUnits, int totalBytes, int completedUnits)
         {
             Stopwatch stopwatch = Stopwatch.StartNew();
 
             while (true)
             {
-                cancellationToken.ThrowIfCancellationRequested();
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    return false;
+                }
 
-                ushort reply;
+                ushort? replyValue;
 
                 try
                 {
-                    reply = Xfer16(0x6202);
+                    replyValue = Xfer16(0x6202);
                 }
                 catch (TimeoutException)
                 {
                     if (HasTimedOut(stopwatch, _options.ClientConnectTimeoutMs))
                     {
                         throw new TimeoutException(
-                            "Timed out waiting for the GBA adapter to respond to the initial multiboot handshake.");
+                            string.Format(
+                                "Timed out after {0} seconds while waiting for the GBA adapter to respond to the initial multiboot handshake.",
+                                _options.ClientConnectTimeoutMs / 1000));
                     }
 
                     DrainTimedOutTransaction();
@@ -550,6 +645,12 @@ namespace GbaUploadGUI
                     continue;
                 }
 
+                if (!replyValue.HasValue)
+                {
+                    return false;
+                }
+
+                ushort reply = replyValue.Value;
                 ReportProgress(
                     MultibootTransferStage.WaitingForClient,
                     completedUnits,
@@ -570,31 +671,37 @@ namespace GbaUploadGUI
                             string.Format("Expected client id 0x{0:X}, received 0x{1:X}.", ExpectedClientId, clientId));
                     }
 
-                    return;
+                    return true;
                 }
 
                 if (HasTimedOut(stopwatch, _options.ClientConnectTimeoutMs))
                 {
-                    throw new TimeoutException("Timed out waiting for the GBA to enter multiboot mode.");
+                    throw new TimeoutException(
+                        string.Format(
+                            "Timed out after {0} seconds while waiting for the GBA to enter multiboot mode.",
+                            _options.ClientConnectTimeoutMs / 1000));
                 }
 
                 Thread.Sleep(_options.RetryDelayMs);
             }
         }
 
-        private ushort WaitForReadyState(CancellationToken cancellationToken)
+        private ushort? WaitForReadyState(CancellationToken cancellationToken)
         {
             Stopwatch stopwatch = Stopwatch.StartNew();
 
             while (true)
             {
-                cancellationToken.ThrowIfCancellationRequested();
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    return null;
+                }
 
-                ushort reply;
+                ushort? replyValue;
 
                 try
                 {
-                    reply = Xfer16((ushort)(0x6300 | _options.Palette));
+                    replyValue = Xfer16((ushort)(0x6300 | _options.Palette));
                 }
                 catch (TimeoutException)
                 {
@@ -607,6 +714,12 @@ namespace GbaUploadGUI
                     continue;
                 }
 
+                if (!replyValue.HasValue)
+                {
+                    return null;
+                }
+
+                ushort reply = replyValue.Value;
                 if ((reply & 0xFF00) == 0x7300)
                 {
                     return reply;
@@ -619,19 +732,22 @@ namespace GbaUploadGUI
             }
         }
 
-        private void WaitForCrcWindow(CancellationToken cancellationToken)
+        private bool WaitForCrcWindow(CancellationToken cancellationToken)
         {
             Stopwatch stopwatch = Stopwatch.StartNew();
 
             while (true)
             {
-                cancellationToken.ThrowIfCancellationRequested();
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    return false;
+                }
 
-                ushort reply;
+                ushort? replyValue;
 
                 try
                 {
-                    reply = Xfer16(0x0065);
+                    replyValue = Xfer16(0x0065);
                 }
                 catch (TimeoutException)
                 {
@@ -644,9 +760,15 @@ namespace GbaUploadGUI
                     continue;
                 }
 
+                if (!replyValue.HasValue)
+                {
+                    return false;
+                }
+
+                ushort reply = replyValue.Value;
                 if (reply == 0x0075)
                 {
-                    return;
+                    return true;
                 }
 
                 if (reply != 0x0074)
@@ -717,8 +839,13 @@ namespace GbaUploadGUI
             }
         }
 
-        private uint Xfer32(uint output)
+        private uint? Xfer32(uint output)
         {
+            if (_activeCancellationToken.IsCancellationRequested)
+            {
+                return null;
+            }
+
             byte[] outputBytes = new byte[4];
             outputBytes[0] = (byte)(output & 0xFF);
             outputBytes[1] = (byte)((output >> 8) & 0xFF);
@@ -729,6 +856,11 @@ namespace GbaUploadGUI
             _port.BaseStream.Flush();
 
             byte[] inputBytes = ReadExact(4);
+            if (inputBytes == null)
+            {
+                return null;
+            }
+
             return
                 (uint)inputBytes[0] |
                 ((uint)inputBytes[1] << 8) |
@@ -736,9 +868,15 @@ namespace GbaUploadGUI
                 ((uint)inputBytes[3] << 24);
         }
 
-        private ushort Xfer16(ushort output)
+        private ushort? Xfer16(ushort output)
         {
-            return (ushort)(Xfer32(output) >> 16);
+            uint? reply = Xfer32(output);
+            if (!reply.HasValue)
+            {
+                return null;
+            }
+
+            return (ushort)(reply.Value >> 16);
         }
 
         private byte[] ReadExact(int length)
@@ -748,7 +886,27 @@ namespace GbaUploadGUI
 
             while (offset < length)
             {
-                int read = _port.Read(buffer, offset, length - offset);
+                if (_activeCancellationToken.IsCancellationRequested)
+                {
+                    return null;
+                }
+
+                int read;
+
+                try
+                {
+                    read = _port.Read(buffer, offset, length - offset);
+                }
+                catch (TimeoutException)
+                {
+                    if (_activeCancellationToken.IsCancellationRequested)
+                    {
+                        return null;
+                    }
+
+                    throw;
+                }
+
                 if (read <= 0)
                 {
                     throw new TimeoutException(
