@@ -12,6 +12,7 @@ namespace GbaUploadGUI
     {
         private byte[] _selectedRom;
         private string _selectedRomPath;
+        private bool _selectedRomWasPatched;
         private bool _isUploading;
         private CancellationTokenSource _uploadCancellationSource;
 
@@ -74,6 +75,7 @@ namespace GbaUploadGUI
         {
             _selectedRom = null;
             _selectedRomPath = null;
+            _selectedRomWasPatched = false;
             SelectedFileLabel.Text = "No file selected";
             RomTitleLabel.Text = "Title:";
             label3.Text = "Game code:";
@@ -83,37 +85,103 @@ namespace GbaUploadGUI
         private void LoadRomFile(string filePath)
         {
             byte[] romBytes = File.ReadAllBytes(filePath);
-            GbaRomHeader header;
+            GbaPreparedRom preparedRom;
 
             try
             {
-                header = GbaRomHeaderParser.Parse(romBytes);
+                preparedRom = GbaRomHeaderParser.PrepareForMultiboot(romBytes, false);
             }
             catch (GbaRomHeaderValidationException exception)
             {
-                ResetLoadedRom();
-                ResetProgressBar();
-                UpdateControlState();
+                if (exception.Error == GbaRomValidationError.PatchableMultibootEntryMissing)
+                {
+                    DialogResult patchResult = MessageBox.Show(
+                        this,
+                        "This ROM appears to be a valid GBA ROM and fits in multiboot RAM, but its dedicated multiboot entry point is empty." +
+                        Environment.NewLine + Environment.NewLine +
+                        "An experimental in-memory patch can copy the normal cartridge entry branch into the multiboot entry slot for this upload only." +
+                        Environment.NewLine + Environment.NewLine +
+                        "The file on disk will not be modified." +
+                        Environment.NewLine + Environment.NewLine +
+                        "Do you want to try this experimental patch?",
+                        "Experimental multiboot patch",
+                        MessageBoxButtons.YesNo,
+                        MessageBoxIcon.Warning);
 
-                MessageBox.Show(
-                    this,
-                    exception.Message,
-                    "Invalid ROM file",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Error);
-                return;
+                    if (patchResult == DialogResult.Yes)
+                    {
+                        try
+                        {
+                            preparedRom = GbaRomHeaderParser.PrepareForMultiboot(romBytes, true);
+                        }
+                        catch (GbaRomHeaderValidationException patchException)
+                        {
+                            ResetLoadedRom();
+                            ResetProgressBar();
+                            UpdateControlState();
+
+                            MessageBox.Show(
+                                this,
+                                patchException.Message,
+                                "Invalid ROM file",
+                                MessageBoxButtons.OK,
+                                MessageBoxIcon.Error);
+                            return;
+                        }
+                    }
+                    else
+                    {
+                        ResetLoadedRom();
+                        ResetProgressBar();
+                        UpdateControlState();
+                        return;
+                    }
+                }
+                else
+                {
+                    ResetLoadedRom();
+                    ResetProgressBar();
+                    UpdateControlState();
+
+                    MessageBox.Show(
+                        this,
+                        exception.Message,
+                        "Invalid ROM file",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Error);
+                    return;
+                }
             }
 
-            _selectedRom = romBytes;
+            _selectedRom = preparedRom.RomBytes;
             _selectedRomPath = filePath;
+            _selectedRomWasPatched = preparedRom.WasPatchedInMemory;
 
-            SelectedFileLabel.Text = Path.GetFileName(filePath);
-            RomTitleLabel.Text = "Title: " + header.Title;
-            label3.Text = "Game code: " + header.GameCode;
-            RomCRC32.Text = "CRC32: " + ComputeCrc32(romBytes).ToString("X8");
+            SelectedFileLabel.Text = GetRomDisplayName(filePath, _selectedRomWasPatched);
+            RomTitleLabel.Text = "Title: " + preparedRom.Header.Title;
+            label3.Text = "Game code: " + preparedRom.Header.GameCode;
+            RomCRC32.Text = "CRC32: " + ComputeCrc32(_selectedRom).ToString("X8");
+
+            if (_selectedRomWasPatched)
+            {
+                MessageBox.Show(
+                    this,
+                    "An experimental in-memory patch was applied to copy the normal cartridge entry branch into the multiboot entry point for this upload session." +
+                    Environment.NewLine + Environment.NewLine +
+                    "The file on disk was not modified.",
+                    "Experimental patch applied",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+            }
 
             ResetProgressBar();
             UpdateControlState();
+        }
+
+        private static string GetRomDisplayName(string romPath, bool wasPatchedInMemory)
+        {
+            string fileName = Path.GetFileName(romPath);
+            return wasPatchedInMemory ? fileName + " (patched in RAM)" : fileName;
         }
 
         private void ResetProgressBar()
