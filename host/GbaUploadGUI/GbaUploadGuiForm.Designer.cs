@@ -29,7 +29,6 @@
         private void InitializeComponent()
         {
             this.groupBox1 = new System.Windows.Forms.GroupBox();
-            this.OpenSerialPortButton = new System.Windows.Forms.Button();
             this.serialPortSelection = new System.Windows.Forms.ComboBox();
             this.label1 = new System.Windows.Forms.Label();
             this.groupBox2 = new System.Windows.Forms.GroupBox();
@@ -49,35 +48,23 @@
             // 
             // groupBox1
             // 
-            this.groupBox1.Controls.Add(this.OpenSerialPortButton);
             this.groupBox1.Controls.Add(this.serialPortSelection);
             this.groupBox1.Controls.Add(this.label1);
             this.groupBox1.Location = new System.Drawing.Point(8, 8);
-            this.groupBox1.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
+            this.groupBox1.Margin = new System.Windows.Forms.Padding(2);
             this.groupBox1.Name = "groupBox1";
-            this.groupBox1.Padding = new System.Windows.Forms.Padding(2, 2, 2, 2);
+            this.groupBox1.Padding = new System.Windows.Forms.Padding(2);
             this.groupBox1.Size = new System.Drawing.Size(512, 61);
             this.groupBox1.TabIndex = 0;
             this.groupBox1.TabStop = false;
-            this.groupBox1.Text = "Serial port configuration";
-            // 
-            // OpenSerialPortButton
-            // 
-            this.OpenSerialPortButton.Location = new System.Drawing.Point(413, 20);
-            this.OpenSerialPortButton.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
-            this.OpenSerialPortButton.Name = "OpenSerialPortButton";
-            this.OpenSerialPortButton.Size = new System.Drawing.Size(89, 24);
-            this.OpenSerialPortButton.TabIndex = 2;
-            this.OpenSerialPortButton.Text = "Open";
-            this.OpenSerialPortButton.UseVisualStyleBackColor = true;
-            this.OpenSerialPortButton.Click += new System.EventHandler(this.OpenSerialPortButton_Click);
+            this.groupBox1.Text = "Link Cable Configuration";
             // 
             // serialPortSelection
             // 
             this.serialPortSelection.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
             this.serialPortSelection.FormattingEnabled = true;
-            this.serialPortSelection.Location = new System.Drawing.Point(38, 15);
-            this.serialPortSelection.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
+            this.serialPortSelection.Location = new System.Drawing.Point(82, 17);
+            this.serialPortSelection.Margin = new System.Windows.Forms.Padding(2);
             this.serialPortSelection.Name = "serialPortSelection";
             this.serialPortSelection.Size = new System.Drawing.Size(108, 21);
             this.serialPortSelection.TabIndex = 1;
@@ -88,9 +75,9 @@
             this.label1.Location = new System.Drawing.Point(5, 20);
             this.label1.Margin = new System.Windows.Forms.Padding(2, 0, 2, 0);
             this.label1.Name = "label1";
-            this.label1.Size = new System.Drawing.Size(29, 13);
+            this.label1.Size = new System.Drawing.Size(57, 13);
             this.label1.TabIndex = 0;
-            this.label1.Text = "Port:";
+            this.label1.Text = "Serial port:";
             this.label1.Click += new System.EventHandler(this.label1_Click);
             // 
             // groupBox2
@@ -102,9 +89,9 @@
             this.groupBox2.Controls.Add(this.SelectedFileLabel);
             this.groupBox2.Controls.Add(this.label2);
             this.groupBox2.Location = new System.Drawing.Point(8, 73);
-            this.groupBox2.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
+            this.groupBox2.Margin = new System.Windows.Forms.Padding(2);
             this.groupBox2.Name = "groupBox2";
-            this.groupBox2.Padding = new System.Windows.Forms.Padding(2, 2, 2, 2);
+            this.groupBox2.Padding = new System.Windows.Forms.Padding(2);
             this.groupBox2.Size = new System.Drawing.Size(512, 93);
             this.groupBox2.TabIndex = 1;
             this.groupBox2.TabStop = false;
@@ -132,7 +119,7 @@
             // BrowseROMFileButton
             // 
             this.BrowseROMFileButton.Location = new System.Drawing.Point(413, 17);
-            this.BrowseROMFileButton.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
+            this.BrowseROMFileButton.Margin = new System.Windows.Forms.Padding(2);
             this.BrowseROMFileButton.Name = "BrowseROMFileButton";
             this.BrowseROMFileButton.Size = new System.Drawing.Size(89, 26);
             this.BrowseROMFileButton.TabIndex = 2;
@@ -174,9 +161,9 @@
             this.groupBox3.Controls.Add(this.UploadButton);
             this.groupBox3.Controls.Add(this.progressBar1);
             this.groupBox3.Location = new System.Drawing.Point(8, 170);
-            this.groupBox3.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
+            this.groupBox3.Margin = new System.Windows.Forms.Padding(2);
             this.groupBox3.Name = "groupBox3";
-            this.groupBox3.Padding = new System.Windows.Forms.Padding(2, 2, 2, 2);
+            this.groupBox3.Padding = new System.Windows.Forms.Padding(2);
             this.groupBox3.Size = new System.Drawing.Size(512, 63);
             this.groupBox3.TabIndex = 2;
             this.groupBox3.TabStop = false;
@@ -185,7 +172,7 @@
             // UploadButton
             // 
             this.UploadButton.Location = new System.Drawing.Point(413, 21);
-            this.UploadButton.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
+            this.UploadButton.Margin = new System.Windows.Forms.Padding(2);
             this.UploadButton.Name = "UploadButton";
             this.UploadButton.Size = new System.Drawing.Size(89, 26);
             this.UploadButton.TabIndex = 3;
@@ -196,7 +183,7 @@
             // progressBar1
             // 
             this.progressBar1.Location = new System.Drawing.Point(8, 25);
-            this.progressBar1.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
+            this.progressBar1.Margin = new System.Windows.Forms.Padding(2);
             this.progressBar1.Name = "progressBar1";
             this.progressBar1.Size = new System.Drawing.Size(380, 18);
             this.progressBar1.TabIndex = 0;
@@ -210,7 +197,7 @@
             this.Controls.Add(this.groupBox2);
             this.Controls.Add(this.groupBox1);
             this.FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedSingle;
-            this.Margin = new System.Windows.Forms.Padding(2, 2, 2, 2);
+            this.Margin = new System.Windows.Forms.Padding(2);
             this.MaximizeBox = false;
             this.MinimizeBox = false;
             this.Name = "GbaUploadGuiForm";
@@ -228,7 +215,6 @@
 
         private System.Windows.Forms.GroupBox groupBox1;
         private System.Windows.Forms.Label label1;
-        private System.Windows.Forms.Button OpenSerialPortButton;
         private System.Windows.Forms.ComboBox serialPortSelection;
         private System.Windows.Forms.GroupBox groupBox2;
         private System.Windows.Forms.Button BrowseROMFileButton;

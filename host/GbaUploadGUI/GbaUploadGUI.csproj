@@ -54,6 +54,7 @@
     <Compile Include="GbaUploadGuiForm.Designer.cs">
       <DependentUpon>GbaUploadGuiForm.cs</DependentUpon>
     </Compile>
+    <Compile Include="GbaRomHeaderParser.cs" />
     <Compile Include="MultibootComms.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
