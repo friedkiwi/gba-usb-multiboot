@@ -2,6 +2,7 @@ using System;
 using System.Diagnostics;
 using System.IO;
 using System.IO.Ports;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -80,10 +81,10 @@ namespace GbaUploadGUI
     {
         public MultibootOptions()
         {
-            BaudRate = 9600;
+            BaudRate = MultibootComms.DefaultBaudRate;
             ReadTimeoutMs = 5000;
             WriteTimeoutMs = 5000;
-            StartupDrainMs = 300;
+            StartupDrainMs = 2000;
             ClientConnectTimeoutMs = 30000;
             ReadyTimeoutMs = 5000;
             FinalizationTimeoutMs = 5000;
@@ -126,6 +127,8 @@ namespace GbaUploadGUI
 
     public sealed class MultibootComms : IDisposable
     {
+        public const int DefaultBaudRate = 9600;
+
         private const int HeaderLengthBytes = 0xC0;
         private const int MaxRomSizeBytes = 0x40000;
         private const int ExpectedClientId = 0x2;
@@ -301,6 +304,8 @@ namespace GbaUploadGUI
             port.Parity = Parity.None;
             port.StopBits = StopBits.One;
             port.Handshake = Handshake.None;
+            port.DtrEnable = true;
+            port.RtsEnable = true;
             port.ReadTimeout = options.ReadTimeoutMs;
             port.WriteTimeout = options.WriteTimeoutMs;
         }
@@ -526,7 +531,25 @@ namespace GbaUploadGUI
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                ushort reply = Xfer16(0x6202);
+                ushort reply;
+
+                try
+                {
+                    reply = Xfer16(0x6202);
+                }
+                catch (TimeoutException)
+                {
+                    if (HasTimedOut(stopwatch, _options.ClientConnectTimeoutMs))
+                    {
+                        throw new TimeoutException(
+                            "Timed out waiting for the GBA adapter to respond to the initial multiboot handshake.");
+                    }
+
+                    DrainTimedOutTransaction();
+                    Thread.Sleep(_options.RetryDelayMs);
+                    continue;
+                }
+
                 ReportProgress(
                     MultibootTransferStage.WaitingForClient,
                     completedUnits,
@@ -567,7 +590,23 @@ namespace GbaUploadGUI
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                ushort reply = Xfer16((ushort)(0x6300 | _options.Palette));
+                ushort reply;
+
+                try
+                {
+                    reply = Xfer16((ushort)(0x6300 | _options.Palette));
+                }
+                catch (TimeoutException)
+                {
+                    if (HasTimedOut(stopwatch, _options.ReadyTimeoutMs))
+                    {
+                        throw new TimeoutException("Timed out waiting for the GBA to become ready for encrypted transfer.");
+                    }
+
+                    DrainTimedOutTransaction();
+                    continue;
+                }
+
                 if ((reply & 0xFF00) == 0x7300)
                 {
                     return reply;
@@ -588,7 +627,23 @@ namespace GbaUploadGUI
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                ushort reply = Xfer16(0x0065);
+                ushort reply;
+
+                try
+                {
+                    reply = Xfer16(0x0065);
+                }
+                catch (TimeoutException)
+                {
+                    if (HasTimedOut(stopwatch, _options.FinalizationTimeoutMs))
+                    {
+                        throw new TimeoutException("Timed out waiting for the GBA to request the CRC.");
+                    }
+
+                    DrainTimedOutTransaction();
+                    continue;
+                }
+
                 if (reply == 0x0075)
                 {
                     return;
@@ -619,13 +674,25 @@ namespace GbaUploadGUI
                 return;
             }
 
-            Stopwatch stopwatch = Stopwatch.StartNew();
+            Stopwatch overall = Stopwatch.StartNew();
+            Stopwatch quiet = Stopwatch.StartNew();
+            StringBuilder startupText = new StringBuilder();
 
-            while (stopwatch.ElapsedMilliseconds < _options.StartupDrainMs)
+            while (overall.ElapsedMilliseconds < _options.StartupDrainMs)
             {
                 if (_port.BytesToRead > 0)
                 {
-                    _port.ReadExisting();
+                    startupText.Append(_port.ReadExisting());
+                    quiet.Restart();
+
+                    if (startupText.ToString().IndexOf("Ready", StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        break;
+                    }
+                }
+                else if (startupText.Length > 0 && quiet.ElapsedMilliseconds >= 100)
+                {
+                    break;
                 }
 
                 Thread.Sleep(15);
@@ -633,6 +700,21 @@ namespace GbaUploadGUI
 
             _port.DiscardInBuffer();
             _port.DiscardOutBuffer();
+        }
+
+        private void DrainTimedOutTransaction()
+        {
+            if (!_port.IsOpen)
+            {
+                return;
+            }
+
+            Thread.Sleep(_options.RetryDelayMs);
+
+            if (_port.BytesToRead > 0)
+            {
+                _port.DiscardInBuffer();
+            }
         }
 
         private uint Xfer32(uint output)
