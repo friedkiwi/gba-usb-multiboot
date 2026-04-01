@@ -1,6 +1,8 @@
 # gba-usb-multiboot
 
-This is a port of [this arduino-based multiboot project](https://github.com/jojolebarjos/gba-multiboot) to the cheap and ubiquitous RP2040-mini controller
+This is a port of [this arduino-based multiboot project](https://github.com/jojolebarjos/gba-multiboot) to the cheap and ubiquitous RP2040-mini controller.
+
+A demo can be found [here](img/demo.mov)
 
 ## Hardware used
 
@@ -10,6 +12,8 @@ This is a port of [this arduino-based multiboot project](https://github.com/jojo
 ## Build instructions
 
 First, build and flash the firmware with PlatformIO to the board.
+
+![assmbledpic](img/boardpic.jpg)
 
 Wire up the cable based on the original repo linked above:
 
